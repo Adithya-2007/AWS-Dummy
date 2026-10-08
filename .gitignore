@@ -1,1 +1,16 @@
-"__pycache__/\n*.pyc\n.env\nvenv/" 
+# Reports and archives
+*.pdf
+*.zip
+
+# Backend files (webpage is standalone)
+app.py
+AeroPluse.py
+Ecomatrix.html
+templates/
+aeropulse-india/
+
+# Python cache
+__pycache__/
+*.pyc
+.env
+venv/
