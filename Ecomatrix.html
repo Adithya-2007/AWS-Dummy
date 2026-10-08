@@ -1,0 +1,393 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>India Air Quality Command Center</title>
+  
+  <!-- Leaflet CSS & JS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+
+  <style>
+    :root {
+      --bg: #030712;
+      --card: #0b1329;
+      --card-border: #1e293b;
+      --text: #f8fafc;
+      --text-muted: #94a3b8;
+      --primary: #10b981;
+      --primary-glow: rgba(16, 185, 129, 0.2);
+      
+      --aqi-good: #10b981;
+      --aqi-fair: #84cc16;
+      --aqi-mod: #eab308;
+      --aqi-poor: #f97316;
+      --aqi-vpoor: #ef4444;
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Inter', system-ui, -apple-system, sans-serif; }
+    body { background-color: var(--bg); color: var(--text); min-height: 100vh; display: flex; flex-direction: column; overflow-x: hidden; }
+
+    /* Header */
+    header {
+      background: rgba(11, 19, 41, 0.8);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--card-border);
+      padding: 16px 24px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      position: sticky;
+      top: 0;
+      z-index: 1000;
+    }
+    .brand { display: flex; align-items: center; gap: 12px; }
+    .brand-icon { width: 36px; height: 36px; background: var(--primary-glow); border: 1px solid var(--primary); border-radius: 8px; display: flex; align-items: center; justify-content: center; color: var(--primary); }
+    .brand h1 { font-size: 1.25rem; font-weight: 700; tracking: -0.02em; }
+    .status-pill {
+      display: flex; align-items: center; gap: 8px; font-size: 0.85rem; padding: 6px 14px; border-radius: 20px;
+      background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.3); color: var(--primary);
+    }
+    .pulse-dot { width: 8px; height: 8px; background: var(--primary); border-radius: 50%; box-shadow: 0 0 8px var(--primary); animation: pulse 2s infinite; }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+    /* Main Grid Layout */
+    .dashboard {
+      display: grid;
+      grid-template-columns: 320px 1fr 380px;
+      gap: 20px;
+      padding: 20px;
+      flex: 1;
+      max-width: 1800px;
+      margin: 0 auto;
+      width: 100%;
+    }
+
+    @media (max-width: 1280px) { .dashboard { grid-template-columns: 280px 1fr; } .telemetry-panel { grid-column: span 2; } }
+    @media (max-width: 900px) { .dashboard { grid-template-columns: 1fr; } .telemetry-panel { grid-column: span 1; } }
+
+    /* Cards */
+    .card { background: var(--card); border: 1px solid var(--card-border); border-radius: 16px; padding: 20px; display: flex; flex-direction: column; gap: 16px; position: relative; overflow: hidden; }
+    .card-header { display: flex; justify-content: space-between; align-items: center; }
+    .card-title { font-size: 0.95rem; font-weight: 600; color: var(--text-muted); display: flex; align-items: center; gap: 8px; }
+
+    /* City Selector Sidebar */
+    .city-list { display: flex; flex-direction: column; gap: 8px; overflow-y: auto; max-height: calc(100vh - 180px); }
+    .city-item {
+      display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; border-radius: 12px;
+      background: rgba(255, 255, 255, 0.02); border: 1px solid transparent; cursor: pointer; transition: all 0.2s;
+    }
+    .city-item:hover { background: rgba(255, 255, 255, 0.05); border-color: var(--card-border); }
+    .city-item.active { background: var(--primary-glow); border-color: var(--primary); }
+    .city-name { font-weight: 600; font-size: 0.95rem; }
+    .city-state { font-size: 0.75rem; color: var(--text-muted); }
+    .city-badge { padding: 4px 10px; border-radius: 6px; font-size: 0.8rem; font-weight: 700; color: #000; }
+
+    /* Map Component */
+    #map { width: 100%; height: 100%; min-height: 450px; border-radius: 12px; z-index: 1; }
+
+    /* AQI Dial & Breakdown */
+    .aqi-display { text-align: center; padding: 20px 0; }
+    .aqi-value { font-size: 3.5rem; font-weight: 800; line-height: 1; margin-bottom: 8px; }
+    .aqi-label { display: inline-block; padding: 6px 16px; border-radius: 20px; font-size: 0.85rem; font-weight: 700; color: #000; text-transform: uppercase; letter-spacing: 0.05em; }
+
+    /* Progress Bars for Pollutants */
+    .pollutant-bars { display: flex; flex-direction: column; gap: 12px; }
+    .p-bar-item { display: flex; flex-direction: column; gap: 4px; }
+    .p-bar-header { display: flex; justify-content: space-between; font-size: 0.8rem; }
+    .p-bar-bg { height: 8px; background: rgba(255,255,255,0.08); border-radius: 4px; overflow: hidden; }
+    .p-bar-fill { height: 100%; border-radius: 4px; transition: width 0.5s ease-in-out; }
+
+    /* Chart Container */
+    .chart-container { position: relative; height: 220px; width: 100%; }
+
+    /* Custom Leaflet Dark Marker */
+    .custom-marker {
+      width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+      color: #000; font-weight: 800; font-size: 0.75rem; box-shadow: 0 0 12px rgba(0,0,0,0.5); border: 2px solid #fff;
+    }
+  </style>
+</head>
+<body>
+
+  <header>
+    <div class="brand">
+      <div class="brand-icon"><i data-lucide="wind"></i></div>
+      <div>
+        <h1>AeroPulse India</h1>
+        <p style="font-size: 0.75rem; color: var(--text-muted)">Real-time Air Quality & Environmental Telemetry</p>
+      </div>
+    </div>
+    <div class="status-pill">
+      <div class="pulse-dot"></div>
+      <span id="systemStatus">Data Engine Active</span>
+    </div>
+  </header>
+
+  <main class="dashboard">
+    <!-- Left Sidebar: City Selection -->
+    <section class="card">
+      <div class="card-header">
+        <span class="card-title"><i data-lucide="map-pin"></i> Monitoring Stations</span>
+      </div>
+      <div class="city-list" id="cityList"></div>
+    </section>
+
+    <!-- Center Panel: Map & Telemetry Chart -->
+    <section style="display: flex; flex-direction: column; gap: 20px;">
+      <div class="card" style="flex: 1; min-height: 480px;">
+        <div class="card-header">
+          <span class="card-title"><i data-lucide="globe"></i> Live Geographic Telemetry Map</span>
+          <span id="selectedCityCoords" style="font-size: 0.8rem; color: var(--text-muted)"></span>
+        </div>
+        <div id="map"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title"><i data-lucide="bar-chart-3"></i> Pollutant Concentration Analysis (μg/m³)</span>
+        </div>
+        <div class="chart-container">
+          <canvas id="pollutantChart"></canvas>
+        </div>
+      </div>
+    </section>
+
+    <!-- Right Sidebar: AQI Summary & Details -->
+    <section class="telemetry-panel" style="display: flex; flex-direction: column; gap: 20px;">
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title"><i data-lucide="activity"></i> Current Air Quality Index</span>
+        </div>
+        <div class="aqi-display">
+          <div class="aqi-value" id="aqiVal">--</div>
+          <div class="aqi-label" id="aqiBadge">Loading</div>
+          <p id="aqiAdvice" style="margin-top: 14px; font-size: 0.85rem; color: var(--text-muted); line-height: 1.4;"></p>
+        </div>
+      </div>
+
+      <div class="card" style="flex: 1;">
+        <div class="card-header">
+          <span class="card-title"><i data-lucide="pie-chart"></i> Component Breakdown</span>
+        </div>
+        <div class="pollutant-bars" id="pollutantBars"></div>
+      </div>
+    </section>
+  </main>
+
+<script>
+  // OpenWeather API Key
+  const API_KEY = "YOUR_OPENWEATHER_API_KEY";
+
+  // City Data with Baseline Values (guarantees immediate rendering)
+  const CITIES = [
+    { name: "New Delhi", state: "Delhi", lat: 28.6139, lon: 77.2090, aqi: 4, components: { pm2_5: 142.5, pm10: 210.8, no2: 45.2, so2: 12.4, o3: 38.0, co: 850.0 } },
+    { name: "Mumbai", state: "Maharashtra", lat: 19.0760, lon: 72.8777, aqi: 2, components: { pm2_5: 28.4, pm10: 58.2, no2: 22.1, so2: 8.5, o3: 42.1, co: 320.0 } },
+    { name: "Bengaluru", state: "Karnataka", lat: 12.9716, lon: 77.5946, aqi: 1, components: { pm2_5: 14.2, pm10: 32.5, no2: 12.8, so2: 5.1, o3: 28.4, co: 210.0 } },
+    { name: "Chennai", state: "Tamil Nadu", lat: 13.0827, lon: 80.2707, aqi: 2, components: { pm2_5: 22.8, pm10: 48.0, no2: 18.4, so2: 7.2, o3: 35.6, co: 290.0 } },
+    { name: "Kolkata", state: "West Bengal", lat: 22.5726, lon: 88.3639, aqi: 3, components: { pm2_5: 68.4, pm10: 112.0, no2: 34.5, so2: 10.1, o3: 41.2, co: 540.0 } },
+    { name: "Hyderabad", state: "Telangana", lat: 17.3850, lon: 78.4867, aqi: 2, components: { pm2_5: 31.2, pm10: 64.1, no2: 24.0, so2: 8.9, o3: 39.0, co: 360.0 } },
+    { name: "Ahmedabad", state: "Gujarat", lat: 23.0225, lon: 72.5714, aqi: 3, components: { pm2_5: 72.1, pm10: 128.4, no2: 38.2, so2: 14.2, o3: 44.0, co: 610.0 } },
+    { name: "Pune", state: "Maharashtra", lat: 18.5204, lon: 73.8567, aqi: 2, components: { pm2_5: 26.5, pm10: 52.3, no2: 19.8, so2: 6.8, o3: 31.5, co: 280.0 } },
+    { name: "Jaipur", state: "Rajasthan", lat: 26.9124, lon: 75.7873, aqi: 3, components: { pm2_5: 61.0, pm10: 105.2, no2: 29.4, so2: 11.0, o3: 36.8, co: 490.0 } }
+  ];
+
+  const AQI_META = {
+    1: { label: "Good", color: "var(--aqi-good)", desc: "Air quality is considered satisfactory, and air pollution poses little or no risk." },
+    2: { label: "Fair", color: "var(--aqi-fair)", desc: "Air quality is acceptable; however, sensitive individuals may experience mild irritation." },
+    3: { label: "Moderate", color: "var(--aqi-mod)", desc: "Members of sensitive groups may experience health effects. General public is less likely affected." },
+    4: { label: "Poor", color: "var(--aqi-poor)", desc: "Everyone may begin to experience health effects; sensitive groups may experience serious effects." },
+    5: { label: "Very Poor", color: "var(--aqi-vpoor)", desc: "Health alert: everyone may experience more serious health effects. Avoid prolonged outdoor exertion." }
+  };
+
+  const POLLUTANT_LIMITS = { pm2_5: 60, pm10: 100, no2: 80, so2: 80, o3: 100, co: 2000 };
+
+  let currentCity = CITIES[0];
+  let chartInstance = null;
+  let mapInstance = null;
+  let mapMarkers = [];
+
+  // Initialize UI & Map
+  function initDashboard() {
+    lucide.createIcons();
+    setupMap();
+    renderCityList();
+    loadCityData(CITIES[0]);
+
+    // Background fetch to replace baseline with live OpenWeather telemetry
+    fetchLiveTelemetry();
+  }
+
+  function setupMap() {
+    mapInstance = L.map('map', { zoomControl: false }).setView([20.5937, 78.9629], 5);
+    L.control.zoom({ position: 'bottomright' }).addTo(mapInstance);
+
+    // Dark Matter Map Tiles
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+      attribution: '&copy; OpenStreetMap &copy; CARTO',
+      subdomains: 'abcd',
+      maxZoom: 19
+    }).addTo(mapInstance);
+
+    // Add city markers
+    CITIES.forEach(city => {
+      const meta = AQI_META[city.aqi];
+      const customIcon = L.divIcon({
+        className: 'custom-pin',
+        html: `<div class="custom-marker" style="background:${meta.color}">${city.aqi}</div>`,
+        iconSize: [28, 28]
+      });
+
+      const marker = L.marker([city.lat, city.lon], { icon: customIcon })
+        .addTo(mapInstance)
+        .bindPopup(`<b>${city.name}</b><br>AQI: ${city.aqi} (${meta.label})`);
+
+      marker.on('click', () => loadCityData(city));
+      mapMarkers.push({ city: city.name, marker });
+    });
+  }
+
+  function renderCityList() {
+    const listEl = document.getElementById('cityList');
+    listEl.innerHTML = CITIES.map(c => {
+      const meta = AQI_META[c.aqi];
+      const isActive = c.name === currentCity.name ? 'active' : '';
+      return `
+        <div class="city-item ${isActive}" onclick="selectCityByName('${c.name}')">
+          <div>
+            <div class="city-name">${c.name}</div>
+            <div class="city-state">${c.state}</div>
+          </div>
+          <div class="city-badge" style="background: ${meta.color}">${meta.label} (${c.aqi})</div>
+        </div>
+      `;
+    }).join('');
+  }
+
+  function selectCityByName(cityName) {
+    const city = CITIES.find(c => c.name === cityName);
+    if (city) loadCityData(city);
+  }
+
+  function loadCityData(city) {
+    currentCity = city;
+    renderCityList();
+
+    document.getElementById('selectedCityCoords').textContent = `${city.lat.toFixed(2)}°N, ${city.lon.toFixed(2)}°E`;
+    
+    // Pan map smoothly
+    mapInstance.flyTo([city.lat, city.lon], 9, { duration: 1.2 });
+
+    // Update AQI Card
+    const meta = AQI_META[city.aqi];
+    const aqiVal = document.getElementById('aqiVal');
+    aqiVal.textContent = city.aqi;
+    aqiVal.style.color = meta.color;
+
+    const badge = document.getElementById('aqiBadge');
+    badge.textContent = meta.label;
+    badge.style.background = meta.color;
+
+    document.getElementById('aqiAdvice').textContent = meta.desc;
+
+    // Render Pollutant Bars & Chart
+    renderPollutantBars(city.components);
+    renderChart(city.components);
+  }
+
+  function renderPollutantBars(comp) {
+    const container = document.getElementById('pollutantBars');
+    const items = [
+      { key: 'pm2_5', name: 'PM2.5 (Fine Particulates)' },
+      { key: 'pm10', name: 'PM10 (Coarse Particulates)' },
+      { key: 'no2', name: 'NO₂ (Nitrogen Dioxide)' },
+      { key: 'so2', name: 'SO₂ (Sulphur Dioxide)' },
+      { key: 'o3', name: 'O₃ (Ozone)' },
+      { key: 'co', name: 'CO (Carbon Monoxide)' }
+    ];
+
+    container.innerHTML = items.map(item => {
+      const val = comp[item.key] || 0;
+      const limit = POLLUTANT_LIMITS[item.key];
+      const pct = Math.min(100, Math.round((val / limit) * 100));
+      let barColor = "var(--primary)";
+      if (pct > 80) barColor = "var(--aqi-poor)";
+      else if (pct > 50) barColor = "var(--aqi-mod)";
+
+      return `
+        <div class="p-bar-item">
+          <div class="p-bar-header">
+            <span style="color: var(--text-muted)">${item.name}</span>
+            <span style="font-weight: 700">${val.toFixed(1)} <small style="font-weight:400; color: var(--text-muted)">μg/m³</small></span>
+          </div>
+          <div class="p-bar-bg">
+            <div class="p-bar-fill" style="width: ${pct}%; background: ${barColor}"></div>
+          </div>
+        </div>
+      `;
+    }).join('');
+  }
+
+  function renderChart(comp) {
+    const ctx = document.getElementById('pollutantChart').getContext('2d');
+    if (chartInstance) chartInstance.destroy();
+
+    chartInstance = new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels: ['PM2.5', 'PM10', 'NO₂', 'SO₂', 'O₃', 'CO / 10'],
+        datasets: [{
+          data: [comp.pm2_5, comp.pm10, comp.no2, comp.so2, comp.o3, comp.co / 10],
+          backgroundColor: '#10b981',
+          borderRadius: 6,
+          hoverBackgroundColor: '#34d399'
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: {
+          y: { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#94a3b8' } },
+          x: { grid: { display: false }, ticks: { color: '#94a3b8' } }
+        }
+      }
+    });
+  }
+
+  async function fetchLiveTelemetry() {
+    let updatedCount = 0;
+    
+    // Asynchronously update all cities with live data from OpenWeather API
+    for (let city of CITIES) {
+      try {
+        const url = `https://api.openweathermap.org/data/2.5/air_pollution?lat=${city.lat}&lon=${city.lon}&appid=${API_KEY}`;
+        const res = await fetch(url);
+        if (res.ok) {
+          const data = await res.json();
+          city.aqi = data.list[0].main.aqi;
+          city.components = data.list[0].components;
+          updatedCount++;
+        }
+      } catch (err) {
+        // Silently retain pre-populated baseline if API key fails or network errors occur
+      }
+    }
+
+    if (updatedCount > 0) {
+      document.getElementById('systemStatus').textContent = `Live API Synchronized (${updatedCount}/${CITIES.length})`;
+      loadCityData(currentCity);
+    }
+  }
+
+  window.onload = initDashboard;
+</script>
+</body>
+</html>

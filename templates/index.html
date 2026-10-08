@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>India Air Quality Command Center & AI Predictive Engine</title>
+  
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://unpkg.com/lucide@latest"></script>
+
+  <style>
+    :root {
+      --bg: #030712;
+      --card: #0b1329;
+      --card-border: #1e293b;
+      --text: #f8fafc;
+      --text-muted: #94a3b8;
+      --primary: #10b981;
+      --primary-glow: rgba(16, 185, 129, 0.2);
+      
+      --aqi-good: #10b981;
+      --aqi-fair: #84cc16;
+      --aqi-mod: #eab308;
+      --aqi-poor: #f97316;
+      --aqi-vpoor: #ef4444;
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Inter', system-ui, -apple-system, sans-serif; }
+    body { background-color: var(--bg); color: var(--text); min-height: 100vh; display: flex; flex-direction: column; overflow-x: hidden; }
+
+    header {
+      background: rgba(11, 19, 41, 0.8);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--card-border);
+      padding: 16px 24px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      position: sticky;
+      top: 0;
+      z-index: 1000;
+    }
+    .brand { display: flex; align-items: center; gap: 12px; }
+    .brand-icon { width: 36px; height: 36px; background: var(--primary-glow); border: 1px solid var(--primary); border-radius: 8px; display: flex; align-items: center; justify-content: center; color: var(--primary); }
+    .brand h1 { font-size: 1.25rem; font-weight: 700; tracking: -0.02em; }
+    .status-pill {
+      display: flex; align-items: center; gap: 8px; font-size: 0.85rem; padding: 6px 14px; border-radius: 20px;
+      background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.3); color: var(--primary);
+    }
+    .pulse-dot { width: 8px; height: 8px; background: var(--primary); border-radius: 50%; box-shadow: 0 0 8px var(--primary); animation: pulse 2s infinite; }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+    .dashboard {
+      display: grid;
+      grid-template-columns: 320px 1fr 380px;
+      gap: 20px;
+      padding: 20px;
+      flex: 1;
+      max-width: 1800px;
+      margin: 0 auto;
+      width: 100%;
+    }
+
+    @media (max-width: 1280px) { .dashboard { grid-template-columns: 280px 1fr; } .telemetry-panel { grid-column: span 2; } }
+    @media (max-width: 900px) { .dashboard { grid-template-columns: 1fr; } .telemetry-panel { grid-column: span 1; } }
+
+    .card { background: var(--card); border: 1px solid var(--card-border); border-radius: 16px; padding: 20px; display: flex; flex-direction: column; gap: 16px; position: relative; overflow: hidden; }
+    .card-header { display: flex; justify-content: space-between; align-items: center; }
+    .card-title { font-size: 0.95rem; font-weight: 600; color: var(--text-muted); display: flex; align-items: center; gap: 8px; }
+
+    .city-list { display: flex; flex-direction: column; gap: 8px; overflow-y: auto; max-height: calc(100vh - 180px); }
+    .city-item {
+      display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; border-radius: 12px;
+      background: rgba(255, 255, 255, 0.02); border: 1px solid transparent; cursor: pointer; transition: all 0.2s;
+    }
+    .city-item:hover { background: rgba(255, 255, 255, 0.05); border-color: var(--card-border); }
+    .city-item.active { background: var(--primary-glow); border-color: var(--primary); }
+    .city-name { font-weight: 600; font-size: 0.95rem; }
+    .city-state { font-size: 0.75rem; color: var(--text-muted); }
+    .city-badge { padding: 4px 10px; border-radius: 6px; font-size: 0.8rem; font-weight: 700; color: #000; }
+
+    #map { width: 100%; height: 100%; min-height: 400px; border-radius: 12px; z-index: 1; }
+
+    .aqi-display { text-align: center; padding: 20px 0; }
+    .aqi-value { font-size: 3.5rem; font-weight: 800; line-height: 1; margin-bottom: 8px; }
+    .aqi-label { display: inline-block; padding: 6px 16px; border-radius: 20px; font-size: 0.85rem; font-weight: 700; color: #000; text-transform: uppercase; letter-spacing: 0.05em; }
+
+    .pollutant-bars { display: flex; flex-direction: column; gap: 12px; }
+    .p-bar-item { display: flex; flex-direction: column; gap: 4px; }
+    .p-bar-header { display: flex; justify-content: space-between; font-size: 0.8rem; }
+    .p-bar-bg { height: 8px; background: rgba(255,255,255,0.08); border-radius: 4px; overflow: hidden; }
+    .p-bar-fill { height: 100%; border-radius: 4px; transition: width 0.5s ease-in-out; }
+
+    .chart-container { position: relative; height: 250px; width: 100%; }
+
+    .custom-marker {
+      width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+      color: #000; font-weight: 800; font-size: 0.75rem; box-shadow: 0 0 12px rgba(0,0,0,0.5); border: 2px solid #fff;
+    }
+  </style>
+</head>
+<body>
+
+  <header>
+    <div class="brand">
+      <div class="brand-icon"><i data-lucide="cpu"></i></div>
+      <div>
+        <h1>AeroPulse Predictive Command</h1>
+        <p style="font-size: 0.75rem; color: var(--text-muted)">Live Sensor Analysis & ML Predictive Telemetry</p>
+      </div>
+    </div>
+    <div class="status-pill">
+      <div class="pulse-dot"></div>
+      <span id="systemStatus">Prediction Model Online</span>
+    </div>
+  </header>
+
+  <main class="dashboard">
+    <section class="card">
+      <div class="card-header">
+        <span class="card-title"><i data-lucide="map-pin"></i> Stations</span>
+      </div>
+      <div class="city-list" id="cityList"></div>
+    </section>
+
+    <section style="display: flex; flex-direction: column; gap: 20px;">
+      <div class="card" style="flex: 1; min-height: 400px;">
+        <div class="card-header">
+          <span class="card-title"><i data-lucide="globe"></i> Geographic Sensor Mapping</span>
+          <span id="selectedCityCoords" style="font-size: 0.8rem; color: var(--text-muted)"></span>
+        </div>
+        <div id="map"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title"><i data-lucide="trending-up"></i> 6-Hour PM2.5 Forecast Model (μg/m³)</span>
+        </div>
+        <div class="chart-container">
+          <canvas id="predictionChart"></canvas>
+        </div>
+      </div>
+    </section>
+
+    <section class="telemetry-panel" style="display: flex; flex-direction: column; gap: 20px;">
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title"><i data-lucide="activity"></i> Current AQI</span>
+        </div>
+        <div class="aqi-display">
+          <div class="aqi-value" id="aqiVal">--</div>
+          <div class="aqi-label" id="aqiBadge">Loading</div>
+          <p id="aqiAdvice" style="margin-top: 14px; font-size: 0.85rem; color: var(--text-muted); line-height: 1.4;"></p>
+        </div>
+      </div>
+
+      <div class="card" style="flex: 1;">
+        <div class="card-header">
+          <span class="card-title"><i data-lucide="pie-chart"></i> Live Component Breakdown</span>
+        </div>
+        <div class="pollutant-bars" id="pollutantBars"></div>
+      </div>
+    </section>
+  </main>
+
+<script>
+  const AQI_META = {
+    1: { label: "Good", color: "var(--aqi-good)", desc: "Satisfactory air quality." },
+    2: { label: "Fair", color: "var(--aqi-fair)", desc: "Acceptable quality." },
+    3: { label: "Moderate", color: "var(--aqi-mod)", desc: "Sensitive groups may experience health effects." },
+    4: { label: "Poor", color: "var(--aqi-poor)", desc: "Health alert: everyone may experience health effects." },
+    5: { label: "Very Poor", color: "var(--aqi-vpoor)", desc: "Emergency condition." }
+  };
+
+  const POLLUTANT_LIMITS = { pm2_5: 60, pm10: 100, no2: 80, so2: 80, o3: 100, co: 2000 };
+
+  let CITIES = [
+    { name: "New Delhi", state: "Delhi", lat: 28.6139, lon: 77.2090, aqi: 4, components: { pm2_5: 142.5, pm10: 210.8, no2: 45.2, so2: 12.4, o3: 38.0, co: 850.0 }, forecast: [] },
+    { name: "Mumbai", state: "Maharashtra", lat: 19.0760, lon: 72.8777, aqi: 2, components: { pm2_5: 28.4, pm10: 58.2, no2: 22.1, so2: 8.5, o3: 42.1, co: 320.0 }, forecast: [] }
+  ];
+
+  let currentCity = CITIES[0];
+  let chartInstance = null;
+  let mapInstance = null;
+  let mapMarkers = [];
+
+  function initDashboard() {
+    if (typeof lucide !== 'undefined') lucide.createIcons();
+    setupMap();
+    renderCityList();
+    fetchBackendCities();
+  }
+
+  function setupMap() {
+    if (typeof L === 'undefined') return;
+    mapInstance = L.map('map', { zoomControl: false }).setView([20.5937, 78.9629], 5);
+    L.control.zoom({ position: 'bottomright' }).addTo(mapInstance);
+
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+      attribution: '&copy; OpenStreetMap &copy; CARTO',
+      subdomains: 'abcd',
+      maxZoom: 19
+    }).addTo(mapInstance);
+  }
+
+  function renderMapMarkers() {
+    if (!mapInstance || typeof L === 'undefined') return;
+    mapMarkers.forEach(m => mapInstance.removeLayer(m));
+    mapMarkers = [];
+
+    CITIES.forEach(city => {
+      const meta = AQI_META[city.aqi] || AQI_META[1];
+      const customIcon = L.divIcon({
+        className: 'custom-pin',
+        html: `<div class="custom-marker" style="background:${meta.color}">${city.aqi}</div>`,
+        iconSize: [28, 28]
+      });
+
+      const marker = L.marker([city.lat, city.lon], { icon: customIcon })
+        .addTo(mapInstance)
+        .bindPopup(`<b>${city.name}</b><br>AQI: ${city.aqi} (${meta.label})`);
+
+      marker.on('click', () => loadCityData(city));
+      mapMarkers.push(marker);
+    });
+  }
+
+  function renderCityList() {
+    const listEl = document.getElementById('cityList');
+    if (!listEl) return;
+    listEl.innerHTML = CITIES.map(c => {
+      const meta = AQI_META[c.aqi] || AQI_META[1];
+      const isActive = currentCity && c.name === currentCity.name ? 'active' : '';
+      return `
+        <div class="city-item ${isActive}" onclick="selectCityByName('${c.name}')">
+          <div>
+            <div class="city-name">${c.name}</div>
+            <div class="city-state">${c.state}</div>
+          </div>
+          <div class="city-badge" style="background: ${meta.color}">${meta.label} (${c.aqi})</div>
+        </div>
+      `;
+    }).join('');
+  }
+
+  function selectCityByName(cityName) {
+    const city = CITIES.find(c => c.name === cityName);
+    if (city) loadCityData(city);
+  }
+
+  function loadCityData(city) {
+    currentCity = city;
+    renderCityList();
+
+    const coordsEl = document.getElementById('selectedCityCoords');
+    if (coordsEl) coordsEl.textContent = `${city.lat.toFixed(2)}°N, ${city.lon.toFixed(2)}°E`;
+    if (mapInstance) mapInstance.flyTo([city.lat, city.lon], 9, { duration: 1.2 });
+
+    const meta = AQI_META[city.aqi] || AQI_META[1];
+    document.getElementById('aqiVal').textContent = city.aqi;
+    document.getElementById('aqiVal').style.color = meta.color;
+
+    const badge = document.getElementById('aqiBadge');
+    badge.textContent = meta.label;
+    badge.style.background = meta.color;
+
+    document.getElementById('aqiAdvice').textContent = meta.desc;
+
+    renderPollutantBars(city.components);
+    renderPredictionChart(city);
+  }
+
+  function renderPollutantBars(comp) {
+    const container = document.getElementById('pollutantBars');
+    if (!container || !comp) return;
+    const items = [
+      { key: 'pm2_5', name: 'PM2.5 (Fine Particulates)' },
+      { key: 'pm10', name: 'PM10 (Coarse Particulates)' },
+      { key: 'no2', name: 'NO₂ (Nitrogen Dioxide)' },
+      { key: 'so2', name: 'SO₂ (Sulphur Dioxide)' },
+      { key: 'o3', name: 'O₃ (Ozone)' },
+      { key: 'co', name: 'CO (Carbon Monoxide)' }
+    ];
+
+    container.innerHTML = items.map(item => {
+      const val = comp[item.key] || 0;
+      const limit = POLLUTANT_LIMITS[item.key] || 100;
+      const pct = Math.min(100, Math.round((val / limit) * 100));
+      let barColor = "var(--primary)";
+      if (pct > 80) barColor = "var(--aqi-poor)";
+      else if (pct > 50) barColor = "var(--aqi-mod)";
+
+      return `
+        <div class="p-bar-item">
+          <div class="p-bar-header">
+            <span style="color: var(--text-muted)">${item.name}</span>
+            <span style="font-weight: 700">${val.toFixed(1)} <small style="font-weight:400; color: var(--text-muted)">μg/m³</small></span>
+          </div>
+          <div class="p-bar-bg">
+            <div class="p-bar-fill" style="width: ${pct}%; background: ${barColor}"></div>
+          </div>
+        </div>
+      `;
+    }).join('');
+  }
+
+  function renderPredictionChart(city) {
+    const canvas = document.getElementById('predictionChart');
+    if (!canvas || typeof Chart === 'undefined') return;
+    const ctx = canvas.getContext('2d');
+    if (chartInstance) chartInstance.destroy();
+
+    const labels = ['Now', ...city.forecast.map(f => f.hour)];
+    const dataPoints = [city.components.pm2_5, ...city.forecast.map(f => f.components.pm2_5)];
+
+    chartInstance = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: labels,
+        datasets: [{
+          label: 'Predicted PM2.5 (μg/m³)',
+          data: dataPoints,
+          borderColor: '#10b981',
+          backgroundColor: 'rgba(16, 185, 129, 0.15)',
+          fill: true,
+          tension: 0.4,
+          pointRadius: 5,
+          pointHoverRadius: 7
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { display: true, labels: { color: '#94a3b8' } } },
+        scales: {
+          y: { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#94a3b8' } },
+          x: { grid: { display: false }, ticks: { color: '#94a3b8' } }
+        }
+      }
+    });
+  }
+
+  async function fetchBackendCities() {
+    try {
+      const res = await fetch('/api/cities?live=true');
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success && json.data.length > 0) {
+          CITIES = json.data;
+          renderCityList();
+          renderMapMarkers();
+          loadCityData(CITIES[0]);
+          document.getElementById('systemStatus').textContent = "Prediction Model Active";
+        }
+      }
+    } catch (e) {
+      console.warn("API offline, falling back...", e);
+    }
+  }
+
+  window.addEventListener('DOMContentLoaded', initDashboard);
+</script>
+</body>
+</html>
